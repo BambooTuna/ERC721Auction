@@ -1,0 +1,31 @@
+{
+  "name": "web3-project",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "bambootuna <bambootuna@gmail.com>",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "app:dev": "yarn workspace app dev",
+    "app:build": "yarn workspace app build",
+    "contract:test": "yarn workspace contract test",
+    "contract:compile": "yarn workspace contract compile",
+    "contract:deploy": "yarn workspace contract deploy",
+    "hosting:deploy": "firebase deploy --only hosting",
+    "functions:build": "yarn workspace functions build",
+    "functions:deploy": "yarn workspace functions deploy"
+  },
+  "workspaces": {
+    "packages": [
+      "projects/app",
+      "projects/functions",
+      "projects/contract"
+    ]
+  },
+  "devDependencies": {
+    "ts-node": "^10.7.0"
+  },
+  "dependencies": {
+    "firebase-tools": "^11.0.1"
+  }
+}

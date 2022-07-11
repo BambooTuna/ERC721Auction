@@ -1,0 +1,18 @@
+{
+  "functions": {
+    "source": "./projects/functions",
+    "predeploy": [
+      "yarn --cwd \"$RESOURCE_DIR\" lint",
+      "yarn --cwd \"$RESOURCE_DIR\" build",
+      "cp $PROJECT_DIR/yarn.lock $RESOURCE_DIR/yarn.lock"
+    ]
+  },
+  "hosting": {
+    "public": "projects/app/public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
