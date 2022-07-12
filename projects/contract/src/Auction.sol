@@ -73,6 +73,8 @@ Ownable
 
     function depositToken(uint256 _tokenId, uint256 _startedAt, uint256 _period, uint256 _attempts) external {
         require(_startedAt > block.timestamp, "invalid _startedAt");
+        require(_period <= 60 * 60 * 24 && _period >= 60 * 10, "invalid _period");
+        require(_attempts >= 3, "invalid _attempts");
         spot.safeTransferFrom(msg.sender, address(this), _tokenId, "");
 
         _auctions[_tokenId].owner = msg.sender;
@@ -234,8 +236,6 @@ Ownable
     ) external pure returns (bytes4) {
         return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
     }
-
-
 
     function tokenURI(uint256 _tokenId) public view virtual override returns (string memory) {
         require(_exists(_tokenId),"nonexistent token");
