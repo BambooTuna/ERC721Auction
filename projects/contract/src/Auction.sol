@@ -18,7 +18,7 @@ import "@openzeppelin/contracts/utils/Base64.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-contract AuctionBase is
+contract AuctionMarket is
 Context,
 AccessControlEnumerable,
 ERC721Enumerable,
@@ -28,6 +28,7 @@ Ownable
     using Strings for uint256;
     using SafeMath for uint256;
     using EnumerableSet for EnumerableSet.Bytes32Set;
+    using EnumerableSet for EnumerableSet.AddressSet;
     using Counters for Counters.Counter;
 
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
@@ -44,7 +45,7 @@ Ownable
         address owner;
         uint256 tokenId;
         uint256 createdAt;
-        uint256 startAt;
+        uint256 startedAt;
         uint256 period;
         uint256 attempts;
         Offer[] offer;
@@ -70,22 +71,22 @@ Ownable
         spot = IERC721Metadata(_spotAddr);
     }
 
-    function depositToken(uint256 _tokenId, uint256 _startAt, uint256 _period, uint256 _attempts) external {
-        require(_startAt > block.timestamp, "invalid _startAt");
+    function depositToken(uint256 _tokenId, uint256 _startedAt, uint256 _period, uint256 _attempts) external {
+        require(_startedAt > block.timestamp, "invalid _startedAt");
         spot.safeTransferFrom(msg.sender, address(this), _tokenId, "");
-        _auctions[_tokenId] = Auction(
-            msg.sender,
-            _tokenId,
-            block.timestamp,
-            _startAt,
-            _period,
-            _attempts,
-            new Offer[](_attempts)
-        );
+
+        _auctions[_tokenId].owner = msg.sender;
+        _auctions[_tokenId].tokenId = _tokenId;
+        _auctions[_tokenId].createdAt = block.timestamp;
+        _auctions[_tokenId].startedAt = _startedAt;
+        _auctions[_tokenId].period = _period;
+        _auctions[_tokenId].attempts = _attempts;
+
+        _resetOffer(_tokenId, _attempts);
         // TODO emit Event
     }
 
-    function bid(uint256 _tokenId, uint256 _turn, uint256 _price) external {
+    function bid(uint256 _tokenId, uint256 _turn, uint256 _price) external payable {
         require(msg.value == _price, "invalid price");
 
         uint256 turn = this.getTurn(_tokenId);
@@ -106,6 +107,8 @@ Ownable
         require(this.isFinished(_tokenId), "not finished");
         address wonUser = this.wonUser(_tokenId);
         require(wonUser == msg.sender, "not won user");
+
+        Auction memory auction = _auctions[_tokenId];
         for (uint256 i = 0; i < auction.attempts; i++) {
             _pending[auction.offer[i].bidder][_tokenId] -= auction.offer[i].bid;
         }
@@ -119,26 +122,54 @@ Ownable
 
         Auction storage auction = _auctions[_tokenId];
         spot.safeTransferFrom(address(this), auction.owner, _tokenId, "");
-        auction = Auction(
-            address(0),
-            0,
-            0,
-            0,
-            0,
-            0,
-            new Offer[](0)
-        );
+
+        auction.owner = address(0);
+        auction.tokenId = 0;
+        auction.createdAt = 0;
+        auction.startedAt = 0;
+        auction.period = 0;
+        auction.attempts = 0;
+        _resetOffer(_tokenId, 0);
         // TODO emit Event
     }
 
-    function wonUser(uint256 _tokenId) external view returns (address memory user) {
+    function wonUser(uint256 _tokenId) external view returns (address user) {
         user = address(0);
         if (this.isFinished(_tokenId)) {
             Auction memory auction = _auctions[_tokenId];
-            uint256 wonCount = 0;
+
+            address[] memory _users = new address[](auction.attempts);
+            uint256[] memory _counts = new uint256[](auction.attempts);
+
             for (uint256 i = 0; i < auction.attempts; i++) {
-                // TODO
-                user = address(auction.offer[i].bidder);
+                address bidder = auction.offer[i].bidder;
+                for (uint256 j = 0; j < _users.length; j++) {
+                    if (_users[j] == address(0)) {
+                        _counts[j] += 1;
+                        _users[j] = bidder;
+                        break;
+                    } else if (bidder == _users[j]) {
+                        _counts[j] += 1;
+                        break;
+                    } else continue;
+                }
+            }
+
+            uint256 maxCounter = 0;
+            bool multipleMax = false;
+            for (uint256 i = 0; i < _users.length; i++) {
+                if (_users[i] == address(0)) break;
+                if (_counts[i] > maxCounter) {
+                    user = _users[i];
+                    maxCounter = _counts[i];
+                    multipleMax = false;
+                } else if (_counts[i] == maxCounter) {
+                    multipleMax = true;
+                }
+            }
+
+            if (multipleMax) {
+                user = address(0);
             }
         }
     }
@@ -146,31 +177,53 @@ Ownable
     function withdrawBiddingMoney(uint256 _tokenId) external {
         require(this.isFinished(_tokenId), "not finished");
         Auction memory auction = _auctions[_tokenId];
-        uint256 storage amount = _pending[msg.sender][_tokenId];
+        uint256 amount = _pending[msg.sender][_tokenId];
         for (uint256 i = 0; i < auction.attempts; i++) {
             if (auction.offer[i].bidder == msg.sender) {
                 amount -= auction.offer[i].bid;
             }
         }
+        _pending[msg.sender][_tokenId] = 0;
         payable(msg.sender).transfer(amount);
-        amount = 0;
         // TODO emit Event
     }
 
     function getTurn(uint256 _tokenId) external view returns (uint256) {
         Auction memory auction = _auctions[_tokenId];
-
-        require(auction.createdAt > 0 && auction.startedAt > 0 && auction.startedAt > block.timestamp, "invalid");
-        (bool ok, uint256 turn) = (block.timestamp - auction.startAt).tryDiv(auction.period);
+        require(auction.createdAt > 0 && auction.startedAt > 0 && auction.startedAt < block.timestamp, "invalid auction");
+        (bool ok, uint256 turn) = (block.timestamp - auction.startedAt).tryDiv(auction.period);
         require(ok, "internal");
-        require(turn <= auction.attempts, "finished");
-        return turn;
+        require(turn < auction.attempts, "finished");
+        return turn + 1;
     }
 
-    function isFinished(uint256 _tokenId) external returns (bool) {
+    function isFinished(uint256 _tokenId) external view returns (bool) {
         Auction memory auction = _auctions[_tokenId];
         require(auction.createdAt > 0 && auction.startedAt > 0 && auction.startedAt > block.timestamp, "invalid");
+        (bool ok, uint256 turn) = (block.timestamp - auction.startedAt).tryDiv(auction.period);
+        require(ok, "internal");
         return turn > auction.attempts;
+    }
+
+    function _resetOffer(uint256 _tokenId, uint256 _length) internal {
+        Offer[] storage offer = _auctions[_tokenId].offer;
+        uint256 length = offer.length;
+
+        if (offer.length > _length) {
+            for (uint256 i = 0; i < length - _length; i++) {
+                offer.pop();
+            }
+        }
+
+        if (offer.length < _length) {
+            for (uint256 i = 0; i < _length - length; i++) {
+                offer.push(Offer(address(0), 0));
+            }
+        }
+
+        for (uint256 i = 0; i < _length; i++) {
+            offer[i] = Offer(address(0), 0);
+        }
     }
 
     function onERC721Received(
